@@ -285,6 +285,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **73 de K0CJH and the OpenHamClock contributors!**
 
-*The original HamClock will cease to function in June 2026. OpenHamClock carries forward Elwood's legacy with modern technology and open-source community development.*
+*"The original HamClock will cease to function in June 2026. OpenHamClock carries forward Elwood's legacy with modern technology and open-source community development."*
 
 </div>
