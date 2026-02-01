@@ -352,7 +352,13 @@ app.get('/api/dxcluster/spots', (req, res) => {
 app.get('/api/stats', (req, res) => {
   // Calculate spots per band
   const bandCounts = {};
+  let spotsWithDxGrid = 0;
+  let spotsWithSpotterGrid = 0;
+  
   spots.forEach(s => {
+    if (s.dxGrid) spotsWithDxGrid++;
+    if (s.spotterGrid) spotsWithSpotterGrid++;
+    
     const freq = s.freqKhz;
     let band = 'other';
     if (freq >= 1800 && freq <= 2000) band = '160m';
@@ -381,10 +387,33 @@ app.get('/api/stats', (req, res) => {
     currentNode: currentNode?.name || 'none',
     totalSpots: spots.length,
     totalReceived: totalSpotsReceived,
+    spotsWithDxGrid,
+    spotsWithSpotterGrid,
     lastSpotTime: lastSpotTime?.toISOString() || null,
     retentionMinutes: CONFIG.spotRetentionMs / 60000,
     bandCounts,
     modeCounts
+  });
+});
+
+// Debug endpoint - show spots with grids
+app.get('/api/debug/grids', (req, res) => {
+  const spotsWithGrids = spots.filter(s => s.dxGrid || s.spotterGrid).slice(0, 20);
+  const allGrids = spots.slice(0, 50).map(s => ({
+    call: s.call,
+    spotter: s.spotter,
+    dxGrid: s.dxGrid || null,
+    spotterGrid: s.spotterGrid || null,
+    comment: s.comment
+  }));
+  
+  res.json({
+    totalSpots: spots.length,
+    spotsWithDxGrid: spots.filter(s => s.dxGrid).length,
+    spotsWithSpotterGrid: spots.filter(s => s.spotterGrid).length,
+    spotsWithAnyGrid: spots.filter(s => s.dxGrid || s.spotterGrid).length,
+    sampleSpotsWithGrids: spotsWithGrids,
+    recentSpots: allGrids
   });
 });
 

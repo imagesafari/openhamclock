@@ -699,87 +699,6 @@ app.get('/api/dxcluster/sources', (req, res) => {
 // Returns spots from the last 5 minutes with spotter and DX locations
 // ============================================
 
-// Cache for callsign grid lookups
-const gridLookupCache = new Map();
-const GRID_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
-
-// Look up grid square for a callsign from HamQTH
-async function lookupCallsignGrid(callsign) {
-  // Check cache first
-  const cached = gridLookupCache.get(callsign);
-  if (cached && (Date.now() - cached.timestamp) < GRID_CACHE_TTL) {
-    return cached.grid;
-  }
-  
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    
-    const response = await fetch(`https://www.hamqth.com/dxcc.php?callsign=${callsign}`, {
-      headers: { 'User-Agent': 'OpenHamClock/3.7' },
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
-    
-    if (response.ok) {
-      const text = await response.text();
-      // Look for grid in response - format varies but often contains grid square
-      const gridMatch = text.match(/grid[:\s]*([A-R]{2}[0-9]{2}(?:[A-X]{2})?)/i);
-      if (gridMatch) {
-        const grid = gridMatch[1].toUpperCase();
-        gridLookupCache.set(callsign, { grid, timestamp: Date.now() });
-        return grid;
-      }
-      // Also try looking for locator
-      const locatorMatch = text.match(/locator[:\s]*([A-R]{2}[0-9]{2}(?:[A-X]{2})?)/i);
-      if (locatorMatch) {
-        const grid = locatorMatch[1].toUpperCase();
-        gridLookupCache.set(callsign, { grid, timestamp: Date.now() });
-        return grid;
-      }
-    }
-  } catch (err) {
-    // Silently fail - we'll fall back to prefix
-  }
-  
-  // Cache null result to avoid repeated lookups
-  gridLookupCache.set(callsign, { grid: null, timestamp: Date.now() });
-  return null;
-}
-
-// Batch lookup grids for multiple callsigns (with rate limiting)
-async function batchLookupGrids(callsigns, maxLookups = 10) {
-  const results = {};
-  let lookupCount = 0;
-  
-  for (const call of callsigns) {
-    // Check cache first (doesn't count toward limit)
-    const cached = gridLookupCache.get(call);
-    if (cached && (Date.now() - cached.timestamp) < GRID_CACHE_TTL) {
-      if (cached.grid) {
-        results[call] = cached.grid;
-      }
-      continue;
-    }
-    
-    // Only do actual lookups up to the limit
-    if (lookupCount >= maxLookups) continue;
-    
-    const grid = await lookupCallsignGrid(call);
-    if (grid) {
-      results[call] = grid;
-    }
-    lookupCount++;
-    
-    // Small delay between lookups
-    if (lookupCount < maxLookups) {
-      await new Promise(r => setTimeout(r, 100));
-    }
-  }
-  
-  return results;
-}
-
 // Cache for DX spot paths to avoid excessive lookups
 let dxSpotPathsCache = { paths: [], allPaths: [], timestamp: 0 };
 const DXPATHS_CACHE_TTL = 5000; // 5 seconds cache between fetches
@@ -889,46 +808,27 @@ app.get('/api/dxcluster/paths', async (req, res) => {
       allCalls.add(s.dxCall);
     });
     
-    // Look up prefix-based locations for all callsigns (fallback)
+    // Look up prefix-based locations for all callsigns (includes grid squares!)
     const prefixLocations = {};
     const callsToLookup = [...allCalls].slice(0, 100);
     
     for (const call of callsToLookup) {
       const loc = estimateLocationFromPrefix(call);
       if (loc) {
-        prefixLocations[call] = { lat: loc.lat, lon: loc.lon, country: loc.country, source: 'prefix' };
+        prefixLocations[call] = { 
+          lat: loc.lat, 
+          lon: loc.lon, 
+          country: loc.country, 
+          grid: loc.grid || null,  // Include grid from prefix mapping!
+          source: loc.grid ? 'prefix-grid' : 'prefix' 
+        };
       }
     }
-    
-    // Batch lookup grids from HamQTH for callsigns we don't have grids for yet
-    // Prioritize spotters since they rarely have grids in comments
-    const callsNeedingGridLookup = [];
-    newSpots.forEach(s => {
-      // Add spotter if no grid from proxy/comment
-      if (!s.spotterGrid) {
-        const extracted = extractGridsFromComment(s.comment);
-        if (!extracted.spotterGrid) {
-          callsNeedingGridLookup.push(s.spotter);
-        }
-      }
-      // Add DX call if no grid from proxy/comment  
-      if (!s.dxGrid) {
-        const extracted = extractGridsFromComment(s.comment);
-        if (!extracted.dxGrid) {
-          callsNeedingGridLookup.push(s.dxCall);
-        }
-      }
-    });
-    
-    // Look up grids (limited to avoid rate limiting)
-    const uniqueCallsForLookup = [...new Set(callsNeedingGridLookup)].slice(0, 20);
-    const lookedUpGrids = await batchLookupGrids(uniqueCallsForLookup, 15);
-    console.log('[DX Paths] Looked up', Object.keys(lookedUpGrids).length, 'grids from', uniqueCallsForLookup.length, 'callsigns');
     
     // Build new paths with locations - try grid first, fall back to prefix
     const newPaths = newSpots
       .map(spot => {
-        // DX station location - try grid from spot data first, then comment, then lookup, then prefix
+        // DX station location - try grid from spot data first, then comment, then prefix
         let dxLoc = null;
         let dxGridSquare = null;
         
@@ -953,21 +853,15 @@ app.get('/api/dxcluster/paths', async (req, res) => {
           }
         }
         
-        // Try looked up grid
-        if (!dxLoc && lookedUpGrids[spot.dxCall]) {
-          const gridLoc = maidenheadToLatLon(lookedUpGrids[spot.dxCall]);
-          if (gridLoc) {
-            dxLoc = { lat: gridLoc.lat, lon: gridLoc.lon, country: '', source: 'grid' };
-            dxGridSquare = lookedUpGrids[spot.dxCall];
+        // Fall back to prefix location (now includes grid-based coordinates!)
+        if (!dxLoc) {
+          dxLoc = prefixLocations[spot.dxCall];
+          if (dxLoc && dxLoc.grid) {
+            dxGridSquare = dxLoc.grid;
           }
         }
         
-        // Fall back to prefix location
-        if (!dxLoc) {
-          dxLoc = prefixLocations[spot.dxCall];
-        }
-        
-        // Spotter location - try grid first, then lookup, then prefix
+        // Spotter location - try grid first, then prefix
         let spotterLoc = null;
         let spotterGridSquare = null;
         
@@ -992,18 +886,12 @@ app.get('/api/dxcluster/paths', async (req, res) => {
           }
         }
         
-        // Try looked up grid for spotter
-        if (!spotterLoc && lookedUpGrids[spot.spotter]) {
-          const gridLoc = maidenheadToLatLon(lookedUpGrids[spot.spotter]);
-          if (gridLoc) {
-            spotterLoc = { lat: gridLoc.lat, lon: gridLoc.lon, country: '', source: 'grid' };
-            spotterGridSquare = lookedUpGrids[spot.spotter];
-          }
-        }
-        
-        // Fall back to prefix location for spotter
+        // Fall back to prefix location for spotter (now includes grid-based coordinates!)
         if (!spotterLoc) {
           spotterLoc = prefixLocations[spot.spotter];
+          if (spotterLoc && spotterLoc.grid) {
+            spotterGridSquare = spotterLoc.grid;
+          }
         }
         
         if (spotterLoc && dxLoc) {
@@ -1222,65 +1110,223 @@ function extractGridFromComment(comment) {
   return grids.dxGrid;
 }
 
-// Estimate location from callsign prefix (fallback)
+// Estimate location from callsign prefix using grid squares
+// This gives much better precision than country centers
 function estimateLocationFromPrefix(callsign) {
-  const prefixLocations = {
-    'K': { lat: 39.8, lon: -98.5, country: 'USA' },
-    'W': { lat: 39.8, lon: -98.5, country: 'USA' },
-    'N': { lat: 39.8, lon: -98.5, country: 'USA' },
-    'AA': { lat: 39.8, lon: -98.5, country: 'USA' },
-    'AB': { lat: 39.8, lon: -98.5, country: 'USA' },
-    'VE': { lat: 56.1, lon: -106.3, country: 'Canada' },
-    'VA': { lat: 56.1, lon: -106.3, country: 'Canada' },
-    'G': { lat: 52.4, lon: -1.5, country: 'England' },
-    'M': { lat: 52.4, lon: -1.5, country: 'England' },
-    'F': { lat: 46.2, lon: 2.2, country: 'France' },
-    'DL': { lat: 51.2, lon: 10.4, country: 'Germany' },
-    'DJ': { lat: 51.2, lon: 10.4, country: 'Germany' },
-    'DK': { lat: 51.2, lon: 10.4, country: 'Germany' },
-    'I': { lat: 41.9, lon: 12.6, country: 'Italy' },
-    'JA': { lat: 36.2, lon: 138.3, country: 'Japan' },
-    'JH': { lat: 36.2, lon: 138.3, country: 'Japan' },
-    'JR': { lat: 36.2, lon: 138.3, country: 'Japan' },
-    'VK': { lat: -25.3, lon: 133.8, country: 'Australia' },
-    'ZL': { lat: -40.9, lon: 174.9, country: 'New Zealand' },
-    'ZS': { lat: -30.6, lon: 22.9, country: 'South Africa' },
-    'LU': { lat: -38.4, lon: -63.6, country: 'Argentina' },
-    'PY': { lat: -14.2, lon: -51.9, country: 'Brazil' },
-    'EA': { lat: 40.5, lon: -3.7, country: 'Spain' },
-    'CT': { lat: 39.4, lon: -8.2, country: 'Portugal' },
-    'PA': { lat: 52.1, lon: 5.3, country: 'Netherlands' },
-    'ON': { lat: 50.5, lon: 4.5, country: 'Belgium' },
-    'OZ': { lat: 56.3, lon: 9.5, country: 'Denmark' },
-    'SM': { lat: 60.1, lon: 18.6, country: 'Sweden' },
-    'LA': { lat: 60.5, lon: 8.5, country: 'Norway' },
-    'OH': { lat: 61.9, lon: 25.7, country: 'Finland' },
-    'UA': { lat: 61.5, lon: 105.3, country: 'Russia' },
-    'RU': { lat: 61.5, lon: 105.3, country: 'Russia' },
-    'RA': { lat: 61.5, lon: 105.3, country: 'Russia' },
-    'BY': { lat: 35.9, lon: 104.2, country: 'China' },
-    'BV': { lat: 23.7, lon: 121.0, country: 'Taiwan' },
-    'HL': { lat: 35.9, lon: 127.8, country: 'South Korea' },
-    'VU': { lat: 20.6, lon: 79.0, country: 'India' },
-    'HS': { lat: 15.9, lon: 100.9, country: 'Thailand' },
-    'DU': { lat: 12.9, lon: 121.8, country: 'Philippines' },
-    'YB': { lat: -0.8, lon: 113.9, country: 'Indonesia' },
-    '9V': { lat: 1.4, lon: 103.8, country: 'Singapore' },
-    '9M': { lat: 4.2, lon: 101.9, country: 'Malaysia' }
+  if (!callsign) return null;
+  
+  // Comprehensive prefix to grid mapping
+  // Uses typical/central grid for each prefix area
+  const prefixGrids = {
+    // USA - by call district
+    'W1': 'FN41', 'K1': 'FN41', 'N1': 'FN41', 'AA1': 'FN41', // New England
+    'W2': 'FN20', 'K2': 'FN20', 'N2': 'FN20', 'AA2': 'FN20', // NY/NJ
+    'W3': 'FM19', 'K3': 'FM19', 'N3': 'FM19', 'AA3': 'FM19', // PA/MD/DE
+    'W4': 'EM73', 'K4': 'EM73', 'N4': 'EM73', 'AA4': 'EM73', // SE USA
+    'W5': 'EM12', 'K5': 'EM12', 'N5': 'EM12', 'AA5': 'EM12', // TX/OK/LA/AR/MS
+    'W6': 'CM97', 'K6': 'CM97', 'N6': 'CM97', 'AA6': 'CM97', // California
+    'W7': 'DN31', 'K7': 'DN31', 'N7': 'DN31', 'AA7': 'DN31', // Pacific NW/Mountain
+    'W8': 'EN81', 'K8': 'EN81', 'N8': 'EN81', 'AA8': 'EN81', // MI/OH/WV
+    'W9': 'EN52', 'K9': 'EN52', 'N9': 'EN52', 'AA9': 'EN52', // IL/IN/WI
+    'W0': 'EN31', 'K0': 'EN31', 'N0': 'EN31', 'AA0': 'EN31', // Central USA
+    // Generic USA (no district)
+    'W': 'EM79', 'K': 'EM79', 'N': 'EM79', 'AA': 'EM79', 'AB': 'EM79',
+    
+    // Canada - by province
+    'VE1': 'FN74', 'VA1': 'FN74', // Maritime
+    'VE2': 'FN35', 'VA2': 'FN35', // Quebec
+    'VE3': 'FN03', 'VA3': 'FN03', // Ontario
+    'VE4': 'EN19', 'VA4': 'EN19', // Manitoba
+    'VE5': 'DO51', 'VA5': 'DO51', // Saskatchewan
+    'VE6': 'DO33', 'VA6': 'DO33', // Alberta
+    'VE7': 'CN89', 'VA7': 'CN89', // British Columbia
+    'VE8': 'DP31', 'VA8': 'DP31', // NWT
+    'VE9': 'FN65', 'VA9': 'FN65', // New Brunswick
+    'VY1': 'CP28', // Yukon
+    'VY2': 'FN86', // PEI
+    'VO1': 'GN37', 'VO2': 'GO17', // Newfoundland/Labrador
+    'VE': 'FN03', 'VA': 'FN03', // Generic Canada
+    
+    // UK & Ireland
+    'G': 'IO91', 'M': 'IO91', '2E': 'IO91', 'GW': 'IO81', // England/Wales
+    'GM': 'IO85', 'MM': 'IO85', '2M': 'IO85', // Scotland
+    'GI': 'IO64', 'MI': 'IO64', '2I': 'IO64', // N. Ireland
+    'EI': 'IO63', 'EJ': 'IO63', // Ireland
+    
+    // Germany
+    'DL': 'JO51', 'DJ': 'JO51', 'DK': 'JO51', 'DA': 'JO51', 'DB': 'JO51', 'DC': 'JO51', 'DD': 'JO51', 'DF': 'JO51', 'DG': 'JO51', 'DH': 'JO51', 'DO': 'JO51',
+    
+    // Rest of Europe
+    'F': 'JN18', // France
+    'I': 'JN61', 'IK': 'JN45', 'IZ': 'JN61', // Italy
+    'EA': 'IN80', 'EC': 'IN80', 'EB': 'IN80', // Spain
+    'CT': 'IM58', // Portugal
+    'PA': 'JO21', 'PD': 'JO21', 'PE': 'JO21', 'PH': 'JO21', // Netherlands
+    'ON': 'JO20', 'OO': 'JO20', 'OR': 'JO20', 'OT': 'JO20', // Belgium
+    'HB': 'JN47', 'HB9': 'JN47', // Switzerland
+    'OE': 'JN78', // Austria
+    'OZ': 'JO55', 'OU': 'JO55', // Denmark
+    'SM': 'JO89', 'SA': 'JO89', 'SB': 'JO89', 'SE': 'JO89', // Sweden
+    'LA': 'JO59', 'LB': 'JO59', // Norway
+    'OH': 'KP20', 'OF': 'KP20', 'OG': 'KP20', 'OI': 'KP20', // Finland
+    'SP': 'JO91', 'SQ': 'JO91', 'SO': 'JO91', '3Z': 'JO91', // Poland
+    'OK': 'JN79', 'OL': 'JN79', // Czech Republic
+    'OM': 'JN88', // Slovakia
+    'HA': 'JN97', 'HG': 'JN97', // Hungary
+    'YO': 'KN34', // Romania
+    'LZ': 'KN22', // Bulgaria
+    'YU': 'KN04', // Serbia
+    '9A': 'JN75', // Croatia
+    'S5': 'JN76', // Slovenia
+    'SV': 'KM17', 'SX': 'KM17', // Greece
+    '9H': 'JM75', // Malta
+    'LY': 'KO24', // Lithuania
+    'ES': 'KO29', // Estonia
+    'YL': 'KO26', // Latvia
+    
+    // Russia & Ukraine
+    'UA': 'KO85', 'RA': 'KO85', 'RU': 'KO85', 'RV': 'KO85', 'RW': 'KO85', 'RX': 'KO85', 'RZ': 'KO85',
+    'UA0': 'OO33', 'RA0': 'OO33', 'R0': 'OO33', // Asiatic Russia
+    'UA9': 'MO06', 'RA9': 'MO06', 'R9': 'MO06', // Ural
+    'UR': 'KO50', 'UT': 'KO50', 'UX': 'KO50', 'US': 'KO50', // Ukraine
+    
+    // Japan - by call area
+    'JA1': 'PM95', 'JH1': 'PM95', 'JR1': 'PM95', 'JE1': 'PM95', 'JF1': 'PM95', 'JG1': 'PM95', 'JI1': 'PM95', 'JJ1': 'PM95', 'JK1': 'PM95', 'JL1': 'PM95', 'JM1': 'PM95', 'JN1': 'PM95', 'JO1': 'PM95', 'JP1': 'PM95', 'JQ1': 'PM95', 'JS1': 'PM95', '7K1': 'PM95', '7L1': 'PM95', '7M1': 'PM95', '7N1': 'PM95',
+    'JA2': 'PM84', 'JA3': 'PM74', 'JA4': 'PM64', 'JA5': 'PM63', 'JA6': 'PM53', 'JA7': 'QM07', 'JA8': 'QN02', 'JA9': 'PM86', 'JA0': 'PM97',
+    'JA': 'PM95', 'JH': 'PM95', 'JR': 'PM95', 'JE': 'PM95', 'JF': 'PM95', 'JG': 'PM95', // Generic Japan
+    
+    // Rest of Asia
+    'HL': 'PM37', 'DS': 'PM37', '6K': 'PM37', '6L': 'PM37', // South Korea
+    'BV': 'PL04', 'BW': 'PL04', 'BX': 'PL04', // Taiwan
+    'BY': 'OM92', 'BT': 'OM92', 'BA': 'OM92', 'BD': 'OM92', 'BG': 'OM92', // China
+    'VU': 'MK82', 'VU2': 'MK82', 'VU3': 'MK82', // India
+    'HS': 'OK03', 'E2': 'OK03', // Thailand
+    '9V': 'OJ11', // Singapore
+    '9M': 'OJ05', '9W': 'OJ05', // Malaysia
+    'DU': 'PK04', 'DV': 'PK04', 'DW': 'PK04', 'DX': 'PK04', 'DY': 'PK04', 'DZ': 'PK04', '4D': 'PK04', '4E': 'PK04', '4F': 'PK04', '4G': 'PK04', '4H': 'PK04', '4I': 'PK04', // Philippines
+    'YB': 'OI33', 'YC': 'OI33', 'YD': 'OI33', 'YE': 'OI33', 'YF': 'OI33', 'YG': 'OI33', 'YH': 'OI33', // Indonesia
+    
+    // Oceania
+    'VK': 'QF56', 'VK1': 'QF44', 'VK2': 'QF56', 'VK3': 'QF22', 'VK4': 'QG62', 'VK5': 'PF95', 'VK6': 'OF86', 'VK7': 'QE38', // Australia
+    'ZL': 'RF70', 'ZL1': 'RF72', 'ZL2': 'RF70', 'ZL3': 'RE66', 'ZL4': 'RE54', // New Zealand
+    'KH6': 'BL01', // Hawaii
+    'KH2': 'QK24', // Guam
+    'FK': 'RG37', // New Caledonia
+    
+    // South America
+    'LU': 'GF05', 'LW': 'GF05', 'LO': 'GF05', 'L2': 'GF05', 'L3': 'GF05', 'L4': 'GF05', 'L5': 'GF05', 'L6': 'GF05', 'L7': 'GF05', 'L8': 'GF05', 'L9': 'GF05', // Argentina
+    'PY': 'GG87', 'PP': 'GG87', 'PQ': 'GG87', 'PR': 'GG87', 'PS': 'GG87', 'PT': 'GG87', 'PU': 'GG87', 'PV': 'GG87', 'PW': 'GG87', 'PX': 'GG87', // Brazil
+    'CE': 'FF46', 'CA': 'FF46', 'CB': 'FF46', 'CC': 'FF46', 'CD': 'FF46', 'XQ': 'FF46', 'XR': 'FF46', '3G': 'FF46', // Chile
+    'CX': 'GF15', // Uruguay
+    'HC': 'FI09', 'HD': 'FI09', // Ecuador
+    'OA': 'FH17', 'OB': 'FH17', 'OC': 'FH17', // Peru
+    'HK': 'FJ35', 'HJ': 'FJ35', '5J': 'FJ35', '5K': 'FJ35', // Colombia
+    'YV': 'FK60', 'YW': 'FK60', 'YX': 'FK60', 'YY': 'FK60', // Venezuela
+    
+    // Caribbean
+    'KP4': 'FK68', 'NP4': 'FK68', 'WP4': 'FK68', // Puerto Rico
+    'VP5': 'FL31', // Turks & Caicos
+    'HI': 'FK49', // Dominican Republic
+    'CO': 'FL10', 'CM': 'FL10', // Cuba
+    'FG': 'FK96', // Guadeloupe
+    'FM': 'FK94', // Martinique
+    'PJ': 'FK52', // Netherlands Antilles
+    
+    // Africa
+    'ZS': 'KG33', 'ZR': 'KG33', 'ZT': 'KG33', 'ZU': 'KG33', // South Africa
+    '5N': 'JJ55', // Nigeria
+    'CN': 'IM63', // Morocco
+    '7X': 'JM16', // Algeria
+    'SU': 'KL30', // Egypt
+    '5Z': 'KI88', // Kenya
+    'ET': 'KJ49', // Ethiopia
+    'EA8': 'IL18', 'EA9': 'IM75', // Canary Islands, Ceuta
+    
+    // Middle East
+    'A4': 'LL93', 'A41': 'LL93', 'A45': 'LL93', // Oman
+    'A6': 'LL65', 'A61': 'LL65', // UAE
+    'A7': 'LL45', 'A71': 'LL45', // Qatar
+    'HZ': 'LL24', // Saudi Arabia
+    '4X': 'KM72', '4Z': 'KM72', // Israel
+    'OD': 'KM73', // Lebanon
+    
+    // Other
+    'VP8': 'GD18', // Falkland Islands
+    'CE9': 'FC56', 'DP0': 'IB59', 'KC4': 'FC56', // Antarctica
+    'SV5': 'KM46', 'SV9': 'KM25', // Dodecanese, Crete
   };
   
-  // Try 2-char prefix first, then 1-char
-  const prefix2 = callsign.substring(0, 2);
-  const prefix1 = callsign.substring(0, 1);
+  const upper = callsign.toUpperCase();
   
-  if (prefixLocations[prefix2]) {
-    return { callsign, ...prefixLocations[prefix2], estimated: true };
+  // Try longest prefix match first (up to 4 chars)
+  for (let len = 4; len >= 1; len--) {
+    const prefix = upper.substring(0, len);
+    if (prefixGrids[prefix]) {
+      const gridLoc = maidenheadToLatLon(prefixGrids[prefix]);
+      if (gridLoc) {
+        return { 
+          callsign, 
+          lat: gridLoc.lat, 
+          lon: gridLoc.lon, 
+          grid: prefixGrids[prefix],
+          country: getCountryFromPrefix(prefix),
+          estimated: true,
+          source: 'prefix-grid'
+        };
+      }
+    }
   }
-  if (prefixLocations[prefix1]) {
-    return { callsign, ...prefixLocations[prefix1], estimated: true };
+  
+  // Fallback to first character
+  const firstCharGrids = {
+    'A': 'LL55', 'B': 'PL02', 'C': 'FN03', 'D': 'JO51', 'E': 'IO63',
+    'F': 'JN18', 'G': 'IO91', 'H': 'KM72', 'I': 'JN61', 'J': 'PM95',
+    'K': 'EM79', 'L': 'GF05', 'M': 'IO91', 'N': 'EM79', 'O': 'KP20',
+    'P': 'GG87', 'R': 'KO85', 'S': 'JO89', 'T': 'KI88', 'U': 'KO85',
+    'V': 'QF56', 'W': 'EM79', 'X': 'EK09', 'Y': 'JO91', 'Z': 'KG33'
+  };
+  
+  const firstChar = upper[0];
+  if (firstCharGrids[firstChar]) {
+    const gridLoc = maidenheadToLatLon(firstCharGrids[firstChar]);
+    if (gridLoc) {
+      return {
+        callsign,
+        lat: gridLoc.lat,
+        lon: gridLoc.lon,
+        grid: firstCharGrids[firstChar],
+        country: 'Unknown',
+        estimated: true,
+        source: 'prefix-grid'
+      };
+    }
   }
   
   return null;
+}
+
+// Helper to get country name from prefix
+function getCountryFromPrefix(prefix) {
+  const prefixCountries = {
+    'W': 'USA', 'K': 'USA', 'N': 'USA', 'AA': 'USA',
+    'VE': 'Canada', 'VA': 'Canada', 'VY': 'Canada', 'VO': 'Canada',
+    'G': 'England', 'M': 'England', '2E': 'England', 'GM': 'Scotland', 'GW': 'Wales', 'GI': 'N. Ireland',
+    'EI': 'Ireland', 'F': 'France', 'DL': 'Germany', 'I': 'Italy', 'EA': 'Spain', 'CT': 'Portugal',
+    'PA': 'Netherlands', 'ON': 'Belgium', 'HB': 'Switzerland', 'OE': 'Austria',
+    'OZ': 'Denmark', 'SM': 'Sweden', 'LA': 'Norway', 'OH': 'Finland',
+    'SP': 'Poland', 'OK': 'Czech Rep', 'HA': 'Hungary', 'YO': 'Romania', 'LZ': 'Bulgaria',
+    'UA': 'Russia', 'UR': 'Ukraine',
+    'JA': 'Japan', 'HL': 'S. Korea', 'BV': 'Taiwan', 'BY': 'China', 'VU': 'India', 'HS': 'Thailand',
+    'VK': 'Australia', 'ZL': 'New Zealand', 'KH6': 'Hawaii',
+    'LU': 'Argentina', 'PY': 'Brazil', 'CE': 'Chile', 'HK': 'Colombia', 'YV': 'Venezuela',
+    'ZS': 'South Africa', 'CN': 'Morocco', 'SU': 'Egypt'
+  };
+  
+  for (let len = 3; len >= 1; len--) {
+    const p = prefix.substring(0, len);
+    if (prefixCountries[p]) return prefixCountries[p];
+  }
+  return 'Unknown';
 }
 
 // ============================================
