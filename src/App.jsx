@@ -497,7 +497,7 @@ const App = () => {
           transformOrigin: 'center center',
           display: 'grid',
           gridTemplateColumns: '270px 1fr 300px',
-          gridTemplateRows: '65px 1fr',
+          gridTemplateRows: '55px 1fr',
           gap: '8px',
           padding: '8px',
           overflow: 'hidden',
