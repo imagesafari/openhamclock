@@ -1,6 +1,6 @@
 /**
  * DXClusterPanel Component
- * Displays DX cluster spots with filtering controls
+ * Displays DX cluster spots with filtering controls and ON/OFF toggle
  */
 import React from 'react';
 import { getBandColor } from '../utils/callsign.js';
@@ -10,9 +10,12 @@ export const DXClusterPanel = ({
   loading, 
   totalSpots,
   filters,
+  onFilterChange,
   onOpenFilters,
   onHoverSpot,
-  hoveredSpot 
+  hoveredSpot,
+  showOnMap,
+  onToggleMap
 }) => {
   const getActiveFilterCount = () => {
     let count = 0;
@@ -32,45 +35,77 @@ export const DXClusterPanel = ({
 
   return (
     <div className="panel" style={{ 
-      padding: '12px', 
+      padding: '10px', 
       display: 'flex', 
       flexDirection: 'column',
-      height: '100%',
-      overflow: 'hidden'
+      flex: '1 1 auto',
+      overflow: 'hidden',
+      minHeight: 0
     }}>
-      {/* Header with filter button */}
+      {/* Header */}
       <div style={{ 
+        fontSize: '12px', 
+        color: 'var(--accent-green)', 
+        fontWeight: '700', 
+        marginBottom: '6px', 
         display: 'flex', 
         justifyContent: 'space-between', 
-        alignItems: 'center',
-        marginBottom: '8px'
+        alignItems: 'center' 
       }}>
-        <div className="panel-header" style={{ margin: 0 }}>
-          📻 DX CLUSTER
-          <span style={{ 
-            fontSize: '10px', 
-            color: 'var(--text-muted)', 
-            fontWeight: '400',
-            marginLeft: '8px'
-          }}>
-            {data.length}/{totalSpots || 0}
-          </span>
+        <span>🌐 DX CLUSTER <span style={{ color: 'var(--accent-green)', fontSize: '10px' }}>● LIVE</span></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '8px', color: 'var(--text-muted)' }}>{data?.length || 0}/{totalSpots || 0}</span>
+          <button
+            onClick={onOpenFilters}
+            style={{
+              background: filterCount > 0 ? 'rgba(255, 170, 0, 0.3)' : 'rgba(100, 100, 100, 0.3)',
+              border: `1px solid ${filterCount > 0 ? '#ffaa00' : '#666'}`,
+              color: filterCount > 0 ? '#ffaa00' : '#888',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '10px',
+              fontFamily: 'JetBrains Mono',
+              cursor: 'pointer'
+            }}
+          >
+            🔍 Filters
+          </button>
+          <button
+            onClick={onToggleMap}
+            style={{
+              background: showOnMap ? 'rgba(68, 136, 255, 0.3)' : 'rgba(100, 100, 100, 0.3)',
+              border: `1px solid ${showOnMap ? '#4488ff' : '#666'}`,
+              color: showOnMap ? '#4488ff' : '#888',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '10px',
+              fontFamily: 'JetBrains Mono',
+              cursor: 'pointer'
+            }}
+          >
+            🗺️ {showOnMap ? 'ON' : 'OFF'}
+          </button>
         </div>
-        <button
-          onClick={onOpenFilters}
+      </div>
+      
+      {/* Quick search */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
+        <input
+          type="text"
+          placeholder="Quick search..."
+          value={filters?.callsign || ''}
+          onChange={(e) => onFilterChange?.({ ...filters, callsign: e.target.value || undefined })}
           style={{
-            background: filterCount > 0 ? 'rgba(0, 221, 255, 0.15)' : 'var(--bg-tertiary)',
-            border: `1px solid ${filterCount > 0 ? 'var(--accent-cyan)' : 'var(--border-color)'}`,
-            color: filterCount > 0 ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-            padding: '4px 10px',
-            borderRadius: '4px',
+            flex: 1,
+            padding: '3px 6px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '3px',
+            color: 'var(--text-primary)',
             fontSize: '11px',
-            cursor: 'pointer',
-            fontFamily: 'JetBrains Mono, monospace'
+            fontFamily: 'JetBrains Mono'
           }}
-        >
-          🔍 {filterCount > 0 ? `Filters (${filterCount})` : 'Filters'}
-        </button>
+        />
       </div>
 
       {/* Spots list */}
@@ -78,7 +113,7 @@ export const DXClusterPanel = ({
         <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
           <div className="loading-spinner" />
         </div>
-      ) : data.length === 0 ? (
+      ) : !data || data.length === 0 ? (
         <div style={{ 
           textAlign: 'center', 
           padding: '20px', 
@@ -94,9 +129,9 @@ export const DXClusterPanel = ({
           fontSize: '11px',
           fontFamily: 'JetBrains Mono, monospace'
         }}>
-          {data.slice(0, 15).map((spot, i) => {
+          {data.slice(0, 20).map((spot, i) => {
             const freq = parseFloat(spot.freq);
-            const color = getBandColor(freq / 1000); // Convert kHz to MHz for color
+            const color = getBandColor(freq / 1000);
             const isHovered = hoveredSpot?.call === spot.call && 
                              Math.abs(parseFloat(hoveredSpot?.freq) - freq) < 1;
             
@@ -107,11 +142,11 @@ export const DXClusterPanel = ({
                 onMouseLeave={() => onHoverSpot?.(null)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '70px 1fr auto',
-                  gap: '8px',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                  marginBottom: '2px',
+                  gridTemplateColumns: '55px 1fr auto',
+                  gap: '6px',
+                  padding: '4px 6px',
+                  borderRadius: '3px',
+                  marginBottom: '1px',
                   background: isHovered ? 'rgba(68, 136, 255, 0.2)' : (i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent'),
                   cursor: 'pointer',
                   transition: 'background 0.15s'

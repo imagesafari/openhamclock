@@ -8,14 +8,14 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Header,
   WorldMap,
-  SpaceWeatherPanel,
-  BandConditionsPanel,
   DXClusterPanel,
   POTAPanel,
   ContestPanel,
-  LocationPanel,
   SettingsPanel,
-  DXFilterManager
+  DXFilterManager,
+  SolarPanel,
+  PropagationPanel,
+  DXpeditionPanel
 } from './components';
 
 // Hooks
@@ -62,11 +62,10 @@ const App = () => {
     return config.defaultDX;
   });
   
-  // Save DX location when changed
   useEffect(() => {
     try {
       localStorage.setItem('openhamclock_dxLocation', JSON.stringify(dxLocation));
-    } catch (e) { console.error('Failed to save DX location:', e); }
+    } catch (e) {}
   }, [dxLocation]);
   
   // UI state
@@ -74,88 +73,65 @@ const App = () => {
   const [showDXFilters, setShowDXFilters] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   
-  // Map layer visibility state with localStorage persistence
+  // Map layer visibility
   const [mapLayers, setMapLayers] = useState(() => {
     try {
       const stored = localStorage.getItem('openhamclock_mapLayers');
-      const defaults = { showDXPaths: true, showDXLabels: true, showPOTA: true, showSatellites: true };
+      const defaults = { showDXPaths: true, showDXLabels: true, showPOTA: true, showSatellites: false };
       return stored ? { ...defaults, ...JSON.parse(stored) } : defaults;
-    } catch (e) { return { showDXPaths: true, showDXLabels: true, showPOTA: true, showSatellites: true }; }
+    } catch (e) { return { showDXPaths: true, showDXLabels: true, showPOTA: true, showSatellites: false }; }
   });
   
-  // Save map layer preferences when changed
   useEffect(() => {
     try {
       localStorage.setItem('openhamclock_mapLayers', JSON.stringify(mapLayers));
-    } catch (e) { console.error('Failed to save map layers:', e); }
+    } catch (e) {}
   }, [mapLayers]);
   
-  // Hovered spot state for highlighting paths on map
   const [hoveredSpot, setHoveredSpot] = useState(null);
   
-  // Toggle handlers for map layers
   const toggleDXPaths = useCallback(() => setMapLayers(prev => ({ ...prev, showDXPaths: !prev.showDXPaths })), []);
   const toggleDXLabels = useCallback(() => setMapLayers(prev => ({ ...prev, showDXLabels: !prev.showDXLabels })), []);
   const togglePOTA = useCallback(() => setMapLayers(prev => ({ ...prev, showPOTA: !prev.showPOTA })), []);
   const toggleSatellites = useCallback(() => setMapLayers(prev => ({ ...prev, showSatellites: !prev.showSatellites })), []);
   
-  // 12/24 hour format preference with localStorage persistence
+  // 12/24 hour format
   const [use12Hour, setUse12Hour] = useState(() => {
     try {
-      const saved = localStorage.getItem('openhamclock_use12Hour');
-      return saved === 'true';
+      return localStorage.getItem('openhamclock_use12Hour') === 'true';
     } catch (e) { return false; }
   });
   
-  // Save 12/24 hour preference when changed
   useEffect(() => {
     try {
       localStorage.setItem('openhamclock_use12Hour', use12Hour.toString());
-    } catch (e) { console.error('Failed to save time format:', e); }
+    } catch (e) {}
   }, [use12Hour]);
   
-  // Toggle time format handler
-  const handleTimeFormatToggle = useCallback(() => {
-    setUse12Hour(prev => !prev);
-  }, []);
+  const handleTimeFormatToggle = useCallback(() => setUse12Hour(prev => !prev), []);
 
-  // Fullscreen toggle handler
+  // Fullscreen
   const handleFullscreenToggle = useCallback(() => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().then(() => {
-        setIsFullscreen(true);
-      }).catch(err => {
-        console.error('Fullscreen error:', err);
-      });
+      document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
     } else {
-      document.exitFullscreen().then(() => {
-        setIsFullscreen(false);
-      }).catch(err => {
-        console.error('Exit fullscreen error:', err);
-      });
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
     }
   }, []);
 
-  // Listen for fullscreen changes
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
-  // Apply theme on initial load
   useEffect(() => {
     applyTheme(config.theme || 'dark');
   }, []);
 
-  // Check if this is first run
   useEffect(() => {
     const saved = localStorage.getItem('openhamclock_config');
-    if (!saved) {
-      setShowSettings(true);
-    }
+    if (!saved) setShowSettings(true);
   }, []);
 
   const handleSaveConfig = (newConfig) => {
@@ -170,7 +146,7 @@ const App = () => {
   const solarIndices = useSolarIndices();
   const potaSpots = usePOTASpots();
   
-  // DX Cluster filters with localStorage persistence
+  // DX Filters
   const [dxFilters, setDxFilters] = useState(() => {
     try {
       const stored = localStorage.getItem('openhamclock_dxFilters');
@@ -178,7 +154,6 @@ const App = () => {
     } catch (e) { return {}; }
   });
   
-  // Save DX filters when changed
   useEffect(() => {
     try {
       localStorage.setItem('openhamclock_dxFilters', JSON.stringify(dxFilters));
@@ -200,7 +175,7 @@ const App = () => {
   const deSunTimes = useMemo(() => calculateSunTimes(config.location.lat, config.location.lon, currentTime), [config.location, currentTime]);
   const dxSunTimes = useMemo(() => calculateSunTimes(dxLocation.lat, dxLocation.lon, currentTime), [dxLocation, currentTime]);
 
-  // Time and uptime update
+  // Time update
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
@@ -223,9 +198,8 @@ const App = () => {
   const utcDate = currentTime.toISOString().substr(0, 10);
   const localDate = currentTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
-  // Scale factor for modern layout
+  // Scale for small screens
   const [scale, setScale] = useState(1);
-  
   useEffect(() => {
     const calculateScale = () => {
       const minWidth = 1200;
@@ -239,7 +213,6 @@ const App = () => {
     return () => window.removeEventListener('resize', calculateScale);
   }, []);
 
-  // Modern Layout
   return (
     <div style={{ 
       width: '100vw',
@@ -256,7 +229,7 @@ const App = () => {
         transform: `scale(${scale})`,
         transformOrigin: 'center center',
         display: 'grid',
-        gridTemplateColumns: '280px 1fr 280px',
+        gridTemplateColumns: '260px 1fr 300px',
         gridTemplateRows: '50px 1fr',
         gap: '8px',
         padding: '8px',
@@ -279,31 +252,51 @@ const App = () => {
           isFullscreen={isFullscreen}
         />
         
-        {/* LEFT COLUMN */}
-        <div style={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          gap: '8px',
-          overflow: 'hidden'
-        }}>
-          <LocationPanel
-            config={config}
-            dxLocation={dxLocation}
-            deSunTimes={deSunTimes}
-            dxSunTimes={dxSunTimes}
-            currentTime={currentTime}
+        {/* LEFT SIDEBAR */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', overflowX: 'hidden' }}>
+          {/* DE Location */}
+          <div className="panel" style={{ padding: '12px', flex: '0 0 auto' }}>
+            <div style={{ fontSize: '13px', color: 'var(--accent-cyan)', fontWeight: '700', marginBottom: '8px' }}>📍 DE - YOUR LOCATION</div>
+            <div style={{ fontFamily: 'JetBrains Mono', fontSize: '13px' }}>
+              <div style={{ color: 'var(--accent-amber)', fontSize: '18px', fontWeight: '700' }}>{deGrid}</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '2px' }}>{config.location.lat.toFixed(2)}°, {config.location.lon.toFixed(2)}°</div>
+              <div style={{ marginTop: '6px', fontSize: '12px' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>☀ </span>
+                <span style={{ color: 'var(--accent-amber)' }}>{deSunTimes.sunrise}</span>
+                <span style={{ color: 'var(--text-secondary)' }}> → </span>
+                <span style={{ color: 'var(--accent-purple)' }}>{deSunTimes.sunset}</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* DX Location */}
+          <div className="panel" style={{ padding: '12px', flex: '0 0 auto' }}>
+            <div style={{ fontSize: '13px', color: 'var(--accent-green)', fontWeight: '700', marginBottom: '8px' }}>🎯 DX - TARGET</div>
+            <div style={{ fontFamily: 'JetBrains Mono', fontSize: '13px' }}>
+              <div style={{ color: 'var(--accent-amber)', fontSize: '18px', fontWeight: '700' }}>{dxGrid}</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '2px' }}>{dxLocation.lat.toFixed(2)}°, {dxLocation.lon.toFixed(2)}°</div>
+              <div style={{ marginTop: '6px', fontSize: '12px' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>☀ </span>
+                <span style={{ color: 'var(--accent-amber)' }}>{dxSunTimes.sunrise}</span>
+                <span style={{ color: 'var(--text-secondary)' }}> → </span>
+                <span style={{ color: 'var(--accent-purple)' }}>{dxSunTimes.sunset}</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Solar Panel */}
+          <SolarPanel solarIndices={solarIndices} />
+          
+          {/* VOACAP/Propagation Panel */}
+          <PropagationPanel 
+            propagation={propagation.data} 
+            loading={propagation.loading} 
+            bandConditions={bandConditions} 
           />
-          <SpaceWeatherPanel data={spaceWeather.data} loading={spaceWeather.loading} />
-          <BandConditionsPanel data={bandConditions.data} loading={bandConditions.loading} />
         </div>
         
         {/* CENTER - MAP */}
-        <div style={{ 
-          background: 'var(--bg-panel)',
-          border: '1px solid var(--border-color)',
-          borderRadius: '6px',
-          overflow: 'hidden'
-        }}>
+        <div style={{ position: 'relative', borderRadius: '6px', overflow: 'hidden' }}>
           <WorldMap
             deLocation={config.location}
             dxLocation={dxLocation}
@@ -321,25 +314,49 @@ const App = () => {
             onToggleSatellites={toggleSatellites}
             hoveredSpot={hoveredSpot}
           />
+          <div style={{ 
+            position: 'absolute', 
+            bottom: '8px', 
+            left: '50%', 
+            transform: 'translateX(-50%)', 
+            fontSize: '13px', 
+            color: 'var(--text-muted)', 
+            background: 'rgba(0,0,0,0.7)', 
+            padding: '2px 8px', 
+            borderRadius: '4px' 
+          }}>
+            Click map to set DX • 73 de {config.callsign}
+          </div>
         </div>
         
-        {/* RIGHT COLUMN */}
-        <div style={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          gap: '8px',
-          overflow: 'hidden'
-        }}>
+        {/* RIGHT SIDEBAR */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'hidden' }}>
+          {/* DX Cluster */}
           <DXClusterPanel
             data={dxCluster.data}
             loading={dxCluster.loading}
             totalSpots={dxCluster.totalSpots}
             filters={dxFilters}
+            onFilterChange={setDxFilters}
             onOpenFilters={() => setShowDXFilters(true)}
             onHoverSpot={setHoveredSpot}
             hoveredSpot={hoveredSpot}
+            showOnMap={mapLayers.showDXPaths}
+            onToggleMap={toggleDXPaths}
           />
-          <POTAPanel data={potaSpots.data} loading={potaSpots.loading} />
+          
+          {/* DXpeditions */}
+          <DXpeditionPanel data={dxpeditions.data} loading={dxpeditions.loading} />
+          
+          {/* POTA */}
+          <POTAPanel 
+            data={potaSpots.data} 
+            loading={potaSpots.loading} 
+            showOnMap={mapLayers.showPOTA}
+            onToggleMap={togglePOTA}
+          />
+          
+          {/* Contests */}
           <ContestPanel data={contests.data} loading={contests.loading} />
         </div>
       </div>
