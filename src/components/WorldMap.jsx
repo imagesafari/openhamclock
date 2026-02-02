@@ -12,6 +12,10 @@ import {
 } from '../utils/geo.js';
 import { filterDXPaths, getBandColor } from '../utils/callsign.js';
 
+import { getAllLayers } from '../plugins/layerRegistry.js';
+import PluginLayer from './PluginLayer.jsx';
+
+
 export const WorldMap = ({ 
   deLocation, 
   dxLocation, 
@@ -44,6 +48,10 @@ export const WorldMap = ({
   const dxPathsMarkersRef = useRef([]);
   const satMarkersRef = useRef([]);
   const satTracksRef = useRef([]);
+
+  const pluginLayersRef = useRef({});
+  const [pluginLayerStates, setPluginLayerStates] = useState({});
+
   
   // Load map style from localStorage
   const getStoredMapSettings = () => {
@@ -416,9 +424,105 @@ export const WorldMap = ({
     }
   }, [satellites, showSatellites]);
 
+
+  // Plugin layer system - properly load saved states
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+
+    try {
+      const availableLayers = getAllLayers();
+      const settings = getStoredMapSettings();
+      const savedLayers = settings.layers || {};
+
+      // Build initial states from localStorage
+      const initialStates = {};
+      availableLayers.forEach(layerDef => {
+        // Use saved state if it exists, otherwise use defaults
+        if (savedLayers[layerDef.id]) {
+          initialStates[layerDef.id] = savedLayers[layerDef.id];
+        } else {
+          initialStates[layerDef.id] = {
+            enabled: layerDef.defaultEnabled,
+            opacity: layerDef.defaultOpacity
+          };
+        }
+      });
+
+      // Initialize state ONLY on first mount (when empty)
+      if (Object.keys(pluginLayerStates).length === 0) {
+        console.log('Loading saved layer states:', initialStates);
+        setPluginLayerStates(initialStates);
+      }
+
+      // Expose controls for SettingsPanel
+      window.hamclockLayerControls = {
+        layers: availableLayers.map(l => ({
+          ...l,
+          enabled: pluginLayerStates[l.id]?.enabled ?? initialStates[l.id]?.enabled ?? l.defaultEnabled,
+          opacity: pluginLayerStates[l.id]?.opacity ?? initialStates[l.id]?.opacity ?? l.defaultOpacity
+        })),
+        toggleLayer: (id, enabled) => {
+          console.log(`Toggle layer ${id}:`, enabled);
+          const settings = getStoredMapSettings();
+          const layers = settings.layers || {};
+          layers[id] = { 
+            enabled: enabled,
+            opacity: layers[id]?.opacity ?? 0.6
+          };
+          localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...settings, layers }));
+          console.log('Saved to localStorage:', layers);
+          setPluginLayerStates(prev => ({ 
+            ...prev, 
+            [id]: { 
+              ...prev[id], 
+              enabled: enabled 
+            } 
+          }));
+        },
+        setOpacity: (id, opacity) => {
+          console.log(`Set opacity ${id}:`, opacity);
+          const settings = getStoredMapSettings();
+          const layers = settings.layers || {};
+          layers[id] = { 
+            enabled: layers[id]?.enabled ?? false,
+            opacity: opacity
+          };
+          localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...settings, layers }));
+          console.log('Saved to localStorage:', layers);
+          setPluginLayerStates(prev => ({ 
+            ...prev, 
+            [id]: { 
+              ...prev[id], 
+              opacity: opacity 
+            } 
+          }));
+        }
+      };
+    } catch (err) {
+      console.error('Plugin system error:', err);
+    }
+  }, [pluginLayerStates]);
+
+
+//  return (
+//    <div style={{ position: 'relative', height: '100%', minHeight: '200px' }}>
+//      <div ref={mapRef} style={{ height: '100%', width: '100%', borderRadius: '8px' }} />
+
   return (
     <div style={{ position: 'relative', height: '100%', minHeight: '200px' }}>
       <div ref={mapRef} style={{ height: '100%', width: '100%', borderRadius: '8px' }} />
+      
+      {/* Render all plugin layers - GENERIC */}
+      {mapInstanceRef.current && getAllLayers().map(layerDef => (
+        <PluginLayer
+          key={layerDef.id}
+          plugin={layerDef}
+          enabled={pluginLayerStates[layerDef.id]?.enabled || false}
+          opacity={pluginLayerStates[layerDef.id]?.opacity || layerDef.defaultOpacity}
+          map={mapInstanceRef.current}
+        />
+      ))}
+      
       
       {/* Map style dropdown */}
       <select
@@ -545,5 +649,6 @@ export const WorldMap = ({
     </div>
   );
 };
+
 
 export default WorldMap;
