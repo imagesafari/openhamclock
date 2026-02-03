@@ -1,4 +1,5 @@
-import { t } from 'i18next';
+import i18n from '../../lang/i18n';
+
 import { useState, useEffect, useRef } from 'react';
 
 //Scaled markers - Bigger circles for stronger quakes
@@ -12,8 +13,8 @@ import { useState, useEffect, useRef } from 'react';
 
 export const metadata = {
   id: 'earthquakes',
-  name: t('plugins.layers.earthquakes.name'),
-  description: t('plugins.layers.earthquakes.description'),
+  name: i18n.t('plugins.layers.earthquakes.name'),
+  description: i18n.t('plugins.layers.earthquakes.description'),
   icon: '🌋',
   category: 'geology',
   defaultEnabled: false,

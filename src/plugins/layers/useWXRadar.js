@@ -1,10 +1,11 @@
-import { t } from 'i18next';
+import i18n from '../../lang/i18n';
+
 import { useState, useEffect } from 'react';
 
 export const metadata = {
   id: 'wxradar',
-  name: t('plugins.layers.wxradar.name'),
-  description: t('plugins.layers.wxradar.description'),
+  name: i18n.t('plugins.layers.wxradar.name'),
+  description: i18n.t('plugins.layers.wxradar.description'),
   icon: '☁️',
   category: 'weather',
   defaultEnabled: false,
@@ -22,7 +23,7 @@ export function useLayer({ enabled = false, opacity = 0.6, map = null }) {
       layers: 'nexrad-n0r-900913',
       format: 'image/png',
       transparent: true,
-      attribution: t('plugins.layers.wxradar.attribution'),
+      attribution: i18n.t('plugins.layers.wxradar.attribution'),
       opacity: opacity,
       zIndex: 200
     }
