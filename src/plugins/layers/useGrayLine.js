@@ -24,7 +24,7 @@ export const metadata = {
   category: 'propagation',
   defaultEnabled: false,
   defaultOpacity: 0.5,
-  version: '1.0.1'
+  version: '1.0.2'
 };
 
 // Solar calculations based on astronomical algorithms
