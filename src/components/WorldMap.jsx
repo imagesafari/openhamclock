@@ -267,8 +267,8 @@ export const WorldMap = ({
           const freq = parseFloat(path.freq);
           const color = getBandColor(freq);
           
-          const isHovered = hoveredSpot && hoveredSpot.call === path.dxCall && 
-                           Math.abs(parseFloat(hoveredSpot.freq) - parseFloat(path.freq)) < 0.01;
+          const isHovered = hoveredSpot && 
+                           hoveredSpot.call?.toUpperCase() === path.dxCall?.toUpperCase();
           
           // Handle path rendering (single continuous array, unwrapped across antimeridian)
           if (pathPoints && Array.isArray(pathPoints) && pathPoints.length > 1) {
@@ -288,7 +288,7 @@ export const WorldMap = ({
 
           // Add DX marker
           const dxCircle = L.circleMarker([dxLatDisplay, dxLonDisplay], {
-            radius: isHovered ? 10 : 6,
+            radius: isHovered ? 12 : 6,
             fillColor: isHovered ? '#ffffff' : color,
             color: isHovered ? color : '#fff',
             weight: isHovered ? 3 : 1.5,
@@ -304,11 +304,15 @@ export const WorldMap = ({
           if (showDXLabels || isHovered) {
             const labelIcon = L.divIcon({
               className: '',
-              html: `<span style="display:inline-block;background:${isHovered ? '#fff' : color};color:${isHovered ? color : '#000'};padding:4px 8px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;white-space:nowrap;border:2px solid ${isHovered ? color : 'rgba(0,0,0,0.5)'};box-shadow:0 2px 4px rgba(0,0,0,0.4);">${path.dxCall}</span>`,
+              html: `<span style="display:inline-block;background:${isHovered ? '#fff' : color};color:${isHovered ? color : '#000'};padding:${isHovered ? '5px 10px' : '4px 8px'};border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:${isHovered ? '14px' : '12px'};font-weight:700;white-space:nowrap;border:2px solid ${isHovered ? color : 'rgba(0,0,0,0.5)'};box-shadow:0 2px ${isHovered ? '8px' : '4px'} rgba(0,0,0,${isHovered ? '0.6' : '0.4'});">${path.dxCall}</span>`,
               iconSize: null,
               iconAnchor: [0, 0]
             });
-            const label = L.marker([dxLatDisplay, dxLonDisplay], { icon: labelIcon, interactive: false }).addTo(map);
+            const label = L.marker([dxLatDisplay, dxLonDisplay], { 
+              icon: labelIcon, 
+              interactive: false,
+              zIndexOffset: isHovered ? 10000 : 0
+            }).addTo(map);
             dxPathsMarkersRef.current.push(label);
           }
         } catch (err) {
