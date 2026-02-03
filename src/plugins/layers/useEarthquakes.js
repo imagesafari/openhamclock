@@ -97,7 +97,7 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null }) {
       else if (mag < 7) color = '#cc0000'; // Dark red - major
       else color = '#990000'; // Very dark red - great
 
-      // Create circle marker with animation class if new
+      // Create circle marker - start with static class
       const circle = L.circleMarker([lat, lon], {
         radius: size / 2,
         fillColor: color,
@@ -105,11 +105,23 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null }) {
         weight: 2,
         opacity: opacity,
         fillOpacity: opacity * 0.7,
-        className: isNew ? 'earthquake-pulse-new' : 'earthquake-marker'
+        className: 'earthquake-marker'
       });
 
-      // Add pulsing animation for new earthquakes
+      // Add pulsing animation for new earthquakes ONLY
       if (isNew) {
+        // Add animation class temporarily
+        circle._path.classList.add('earthquake-pulse-new');
+        
+        // Remove animation class after it completes (0.6s)
+        setTimeout(() => {
+          try {
+            if (circle._path) {
+              circle._path.classList.remove('earthquake-pulse-new');
+            }
+          } catch (e) {}
+        }, 600);
+        
         // Create pulsing ring effect
         const pulseRing = L.circle([lat, lon], {
           radius: 50000, // 50km radius in meters
