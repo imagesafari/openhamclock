@@ -255,18 +255,22 @@ function makeDraggable(element, storageKey) {
 
 // Add minimize/maximize functionality to control panels
 function addMinimizeToggle(element, storageKey) {
-  if (!element) return;
+  if (!element) {
+    console.warn('[WSPR] addMinimizeToggle: element is null/undefined for', storageKey);
+    return;
+  }
   
   const minimizeKey = storageKey + '-minimized';
   
   // Create minimize button
-  const header = element.querySelector('div:first-child');
+  // Use firstElementChild instead of querySelector
+  const header = element.firstElementChild;
   if (!header) {
-    console.warn('[WSPR] No header found for minimize toggle on', storageKey);
+    console.warn('[WSPR] No header found for minimize toggle on', storageKey, 'children:', element.children.length);
     return;
   }
   
-  console.log('[WSPR] Adding minimize toggle to', storageKey);
+  console.log('[WSPR] Adding minimize toggle to', storageKey, 'header:', header.innerHTML.substring(0, 50));
   
   // Wrap content (everything except header)
   const content = Array.from(element.children).slice(1);
