@@ -579,7 +579,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
           font-size: 11px;
           color: white;
           box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
+          min-width: 160px;
         `;
         div.innerHTML = `
           <div style="font-weight: bold; margin-bottom: 6px; font-size: 13px;">📊 WSPR Activity</div>
@@ -695,7 +695,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
           font-size: 10px;
           color: white;
           box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
+          min-width: 160px;
         `;
         div.innerHTML = '<div style="font-weight: bold; margin-bottom: 6px; font-size: 11px;">📊 Band Activity</div><div style="opacity: 0.7;">Loading...</div>';
         
