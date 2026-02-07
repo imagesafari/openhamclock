@@ -807,21 +807,16 @@ export const WorldMap = ({
       <div ref={mapRef} style={{ height: '100%', width: '100%', borderRadius: '8px', background: mapStyle === 'countries' ? '#4a90d9' : undefined }} />
       
       {/* Render all plugin layers */}
-		{mapInstanceRef.current && getAllLayers().map(layerDef => {
-		  // 1. Get the current state for this layer ID
-		  const currentState = pluginLayerStates[layerDef.id];
-		
-		  return (
-		    <PluginLayer
-		      key={layerDef.id}
-		      plugin={layerDef}
-		      // 2. Add fallbacks using the '??' operator
-		      enabled={currentState?.enabled ?? layerDef.defaultEnabled}
-		      opacity={currentState?.opacity ?? layerDef.defaultOpacity}
-		      map={mapInstanceRef.current}
-		    />
-		  );
-		})}
+{mapInstanceRef.current && getAllLayers().map(layerDef => (
+  <PluginLayer
+    key={layerDef.id}
+    plugin={layerDef}
+    // THIS IS THE SECTION TO CHANGE:
+    enabled={pluginLayerStates[layerDef.id]?.enabled || false}
+    opacity={pluginLayerStates[layerDef.id]?.opacity || layerDef.defaultOpacity}
+    map={mapInstanceRef.current}
+  />
+))}
       //  MODIS SLIDER CODE HERE 
       {mapStyle === 'MODIS' && (
         <div style={{
