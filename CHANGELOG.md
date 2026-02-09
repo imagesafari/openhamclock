@@ -2,7 +2,7 @@
 
 All notable changes to OpenHamClock will be documented in this file.
 
-## [15.0.1] - 2026-02-08
+## [15.0.2] - 2026-02-08
 
 ### Added
 - **Per-panel font sizing (Dockable Mode)** — A−/A+ buttons in each panel's tabset header. 10 zoom steps from 70% to 200%, persisted per-panel in localStorage. Percentage badge shown when zoomed; click to reset. World Map excluded (has its own zoom)
@@ -23,6 +23,7 @@ All notable changes to OpenHamClock will be documented in this file.
 - **WSJT-X relay agent ECONNRESET** — Relay v1.1.0: added `Connection: close` header, startup connectivity test, clear error diagnostics for ECONNRESET/ECONNREFUSED/DNS/timeout
 - **Pi kiosk mode loses settings on reboot** — Chromium `--incognito` flag wiped localStorage on every restart. Replaced with dedicated `--user-data-dir` profile. `update.sh` auto-patches existing kiosk installs
 - **Open-Meteo 429 rate limiting** — Client-side Open-Meteo calls replaced with server-side proxy (see Weather proxy above)
+- **Map jumping near dateline (Australia/NZ/Pacific)** — Panning east or west past 180° longitude caused the map to snap violently. Root cause: `moveend` handler normalized center longitude to ±180°, fighting Leaflet's `worldCopyJump`. Also: tile layer `bounds` restricted to [-180, 180] prevented tiles from loading in world copies. Fix: center longitude no longer normalized (Leaflet manages wrap internally), tile bounds removed for all styles except MODIS (which only covers -180..180)
 
 ## [15.0.0] - 2026-02-08
 

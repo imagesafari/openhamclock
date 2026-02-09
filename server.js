@@ -3388,7 +3388,7 @@ app.get('/api/pskreporter/http/:callsign', async (req, res) => {
     
     const response = await fetch(url, {
       headers: { 
-        'User-Agent': 'OpenHamClock/15.0.1 (Amateur Radio Dashboard)',
+        'User-Agent': 'OpenHamClock/15.0.2 (Amateur Radio Dashboard)',
         'Accept': '*/*'
       },
       signal: controller.signal

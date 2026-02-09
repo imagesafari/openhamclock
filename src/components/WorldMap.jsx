@@ -150,8 +150,7 @@ export const WorldMap = ({
     tileLayerRef.current = L.tileLayer(MAP_STYLES[mapStyle].url, {
       attribution: MAP_STYLES[mapStyle].attribution,
       noWrap: false,
-      crossOrigin: 'anonymous',
-      bounds: [[-85, -180], [85, 180]]
+      crossOrigin: 'anonymous'
     }).addTo(map);
 
     // Day/night terminator
@@ -190,14 +189,13 @@ export const WorldMap = ({
     });
     
     // Save map view when user pans or zooms
+    // IMPORTANT: Do NOT normalize longitude here. Leaflet tracks center beyond ±180 
+    // for smooth panning across the antimeridian (worldCopyJump). Normalizing causes
+    // the map to jump for users near the date line (Australia, NZ, Pacific).
     map.on('moveend', () => {
       const center = map.getCenter();
       const zoom = map.getZoom();
-      // Normalize longitude to -180 to 180 range
-      let lng = center.lng;
-      while (lng > 180) lng -= 360;
-      while (lng < -180) lng += 360;
-      setMapView({ center: [center.lat, lng], zoom });
+      setMapView({ center: [center.lat, center.lng], zoom });
     });
 
     mapInstanceRef.current = map;
@@ -233,8 +231,8 @@ export const WorldMap = ({
       attribution: MAP_STYLES[mapStyle].attribution,
       noWrap: false,
       crossOrigin: 'anonymous',
-      // NASA GIBS tiles are best displayed within these bounds due to cropping of diseminated imagery
-      bounds: [[-85, -180], [85, 180]]
+      // NASA GIBS tiles only cover -180..180; other tile providers wrap naturally
+      ...(mapStyle === 'MODIS' ? { bounds: [[-85, -180], [85, 180]] } : {})
     }).addTo(mapInstanceRef.current);
 
     // Ensure terminator and other overlays stay on top of the new tile layer
