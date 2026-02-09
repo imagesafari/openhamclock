@@ -98,6 +98,11 @@ export const DockableApp = ({
   setShowSettings,
   handleFullscreenToggle,
   isFullscreen,
+
+  // Update
+  handleUpdateClick,
+  updateInProgress,
+  isLocalInstall,
 }) => {
   const layoutRef = useRef(null);
   const [model, setModel] = useState(() => Model.fromJson(loadLayout()));
@@ -493,6 +498,9 @@ export const DockableApp = ({
           onSettingsClick={() => setShowSettings(true)}
           onFullscreenToggle={handleFullscreenToggle}
           isFullscreen={isFullscreen}
+          onUpdateClick={handleUpdateClick}
+          updateInProgress={updateInProgress}
+          showUpdateButton={isLocalInstall}
         />
       </div>
 
