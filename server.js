@@ -3619,7 +3619,7 @@ app.get('/api/pskreporter/http/:callsign', async (req, res) => {
     
     const response = await fetch(url, {
       headers: { 
-        'User-Agent': 'OpenHamClock/15.1.4 (Amateur Radio Dashboard)',
+        'User-Agent': 'OpenHamClock/15.1.5 (Amateur Radio Dashboard)',
         'Accept': '*/*'
       },
       signal: controller.signal
@@ -4552,7 +4552,7 @@ app.get('/api/wspr/heatmap', async (req, res) => {
     
     const response = await fetch(url, {
       headers: { 
-        'User-Agent': 'OpenHamClock/15.1.4 (Amateur Radio Dashboard)',
+        'User-Agent': 'OpenHamClock/15.1.5 (Amateur Radio Dashboard)',
         'Accept': '*/*'
       },
       signal: controller.signal
@@ -7059,7 +7059,7 @@ const weatherCache = new Map();          // key: "weather:lat,lon" → { data, t
 const nwsPointsCache = new Map();        // key: "lat,lon" → { gridId, gridX, gridY, stationUrl } (never expires)
 const WEATHER_CACHE_TTL = 2 * 60 * 60 * 1000;  // 2 hours
 const WEATHER_STALE_TTL = 6 * 60 * 60 * 1000;  // Serve stale data up to 6 hours if upstream is down
-const NWS_USER_AGENT = 'OpenHamClock/15.1.4 (https://openhamclock.com, Amateur Radio Dashboard)';
+const NWS_USER_AGENT = 'OpenHamClock/15.1.5 (https://openhamclock.com, Amateur Radio Dashboard)';
 
 // Rough bounding box for US coverage (CONUS + Alaska + Hawaii + territories)
 function isUSCoordinates(lat, lon) {
@@ -7647,8 +7647,8 @@ app.get('/api/update/status', (req, res) => {
 const WSJTX_UDP_PORT = parseInt(process.env.WSJTX_UDP_PORT || '2237');
 const WSJTX_ENABLED = process.env.WSJTX_ENABLED !== 'false'; // enabled by default
 const WSJTX_RELAY_KEY = process.env.WSJTX_RELAY_KEY || ''; // auth key for remote relay agent
-const WSJTX_MAX_DECODES = 200; // max decodes to keep in memory
-const WSJTX_MAX_AGE = 30 * 60 * 1000; // 30 minutes
+const WSJTX_MAX_DECODES = 500; // max decodes to keep in memory
+const WSJTX_MAX_AGE = 60 * 60 * 1000; // 60 minutes (configurable via client)
 
 // WSJT-X protocol magic number
 const WSJTX_MAGIC = 0xADBCCBDA;
@@ -7708,13 +7708,18 @@ function getRelaySession(sessionId) {
   return wsjtxRelaySessions[sessionId];
 }
 
-// Cleanup expired sessions every 5 minutes
+// Cleanup expired sessions and stale grid cache entries every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [id, session] of Object.entries(wsjtxRelaySessions)) {
     if (now - session.lastAccess > WSJTX_SESSION_MAX_AGE) {
       delete wsjtxRelaySessions[id];
     }
+  }
+  // Prune grid cache entries older than 2 hours
+  const gridCutoff = now - 2 * 60 * 60 * 1000;
+  for (const [call, entry] of wsjtxGridCache) {
+    if (entry.timestamp < gridCutoff) wsjtxGridCache.delete(call);
   }
 }, 5 * 60 * 1000);
 
@@ -7933,30 +7938,65 @@ function parseWSJTXMessage(buffer) {
  * Parse decoded message text to extract callsigns and grid
  * FT8/FT4 messages follow a standard format
  */
+// Callsign → grid cache: remembers grids seen in CQ messages for later QSO exchanges
+const wsjtxGridCache = new Map(); // callsign → { grid, lat, lon, timestamp }
+
 function parseDecodeMessage(text) {
   if (!text) return {};
   const result = {};
   
+  // Grid square regex: 2 alpha + 2 digits, optionally + 2 lowercase alpha
+  const gridRegex = /\b([A-R]{2}\d{2}(?:[a-x]{2})?)\b/i;
+  
   // CQ message: "CQ DX K1ABC FN42" or "CQ K1ABC FN42"
-  const cqMatch = text.match(/^CQ\s+(?:(\S+)\s+)?([A-Z0-9/]+)\s+([A-Z]{2}\d{2}[a-z]{0,2})?/i);
+  const cqMatch = text.match(/^CQ\s+(?:(\S+)\s+)?([A-Z0-9/]+)\s+([A-R]{2}\d{2}[a-x]{0,2})?/i);
   if (cqMatch) {
     result.type = 'CQ';
     result.modifier = cqMatch[1] && !cqMatch[1].match(/^[A-Z0-9/]{3,}$/) ? cqMatch[1] : null;
     result.caller = cqMatch[2] || cqMatch[1];
     result.grid = cqMatch[3] || null;
+    
+    // Cache this callsign's grid for future lookups
+    if (result.caller && result.grid) {
+      const coords = gridToLatLon(result.grid);
+      if (coords) {
+        wsjtxGridCache.set(result.caller.toUpperCase(), {
+          grid: result.grid,
+          lat: coords.latitude,
+          lon: coords.longitude,
+          timestamp: Date.now()
+        });
+      }
+    }
     return result;
   }
   
   // Standard QSO exchange: "K1ABC W2DEF +05" or "K1ABC W2DEF R-12" or "K1ABC W2DEF RR73"
+  // or "K1ABC W2DEF EN82" or "K1ABC W2DEF EN82 a7"
   const qsoMatch = text.match(/^([A-Z0-9/]+)\s+([A-Z0-9/]+)\s+(.*)/i);
   if (qsoMatch) {
     result.type = 'QSO';
     result.dxCall = qsoMatch[1];
     result.deCall = qsoMatch[2];
     result.exchange = qsoMatch[3].trim();
-    // Check for grid in exchange
-    const gridMatch = result.exchange.match(/^([A-Z]{2}\d{2}[a-z]{0,2})$/i);
-    if (gridMatch) result.grid = gridMatch[1];
+    
+    // Look for a grid square ANYWHERE in the exchange text
+    // This handles "EN82", "EN82 a7", "R EN82", etc.
+    const gridMatch = result.exchange.match(gridRegex);
+    if (gridMatch && isValidGrid(gridMatch[1])) {
+      result.grid = gridMatch[1];
+      // Cache grid for both callsigns involved
+      const coords = gridToLatLon(result.grid);
+      if (coords) {
+        // Grid in exchange typically belongs to the calling station (dxCall)
+        wsjtxGridCache.set(result.dxCall.toUpperCase(), {
+          grid: result.grid,
+          lat: coords.latitude,
+          lon: coords.longitude,
+          timestamp: Date.now()
+        });
+      }
+    }
     return result;
   }
   
@@ -8052,6 +8092,34 @@ function handleWSJTXMessage(msg, state) {
         if (coords) {
           decode.lat = coords.latitude;
           decode.lon = coords.longitude;
+        }
+      }
+      
+      // If no grid from message, try callsign → grid cache (from prior CQ/exchange with grid)
+      if (!decode.lat) {
+        const targetCall = (parsed.caller || parsed.dxCall || '').toUpperCase();
+        if (targetCall) {
+          const cached = wsjtxGridCache.get(targetCall);
+          if (cached) {
+            decode.lat = cached.lat;
+            decode.lon = cached.lon;
+            decode.grid = decode.grid || cached.grid;
+            decode.gridSource = 'cache';
+          }
+        }
+      }
+      
+      // Last resort: estimate from callsign prefix
+      if (!decode.lat) {
+        const targetCall = parsed.caller || parsed.dxCall || '';
+        if (targetCall) {
+          const prefixLoc = estimateLocationFromPrefix(targetCall);
+          if (prefixLoc) {
+            decode.lat = prefixLoc.lat;
+            decode.lon = prefixLoc.lon;
+            decode.grid = decode.grid || prefixLoc.grid;
+            decode.gridSource = 'prefix';
+          }
         }
       }
       
