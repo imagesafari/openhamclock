@@ -30,6 +30,7 @@ export const WorldMap = ({
   onDXChange,
   dxLocked,
   potaSpots, 
+  sotaSpots,
   mySpots, 
   dxPaths, 
   dxFilters, 
@@ -40,6 +41,7 @@ export const WorldMap = ({
   showDXLabels, 
   onToggleDXLabels, 
   showPOTA, 
+  showSOTA,
   showSatellites, 
   showPSKReporter,
   showWSJTX,
@@ -60,6 +62,7 @@ export const WorldMap = ({
   const sunMarkerRef = useRef(null);
   const moonMarkerRef = useRef(null);
   const potaMarkersRef = useRef([]);
+  const sotaMarkersRef = useRef([]);
   const mySpotsMarkersRef = useRef([]);
   const mySpotsLinesRef = useRef([]);
   const dxPathsLinesRef = useRef([]);
@@ -544,6 +547,45 @@ export const WorldMap = ({
     }
   }, [potaSpots, showPOTA, showDXLabels]);
 
+  // Update SOTA markers
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    sotaMarkersRef.current.forEach(m => map.removeLayer(m));
+    sotaMarkersRef.current = [];
+
+    if (showSOTA && sotaSpots) {
+      sotaSpots.forEach(spot => {
+        if (spot.lat && spot.lon) {
+          // Orange diamond marker for SOTA activators
+          const diamondIcon = L.divIcon({
+            className: '',
+            html: `<span style="display:inline-block;width:12px;height:12px;background:#ff9632;transform:rotate(45deg);border:1px solid rgba(0,0,0,0.4);filter:drop-shadow(0 1px 2px rgba(0,0,0,0.6));"></span>`,
+            iconSize: [12, 12],
+            iconAnchor: [6, 6]
+          });
+          const marker = L.marker([spot.lat, spot.lon], { icon: diamondIcon })
+            .bindPopup(`<b style="color:#ff9632">${spot.call}</b><br><span style="color:#888">${spot.ref}</span>${spot.summit ? ` — ${spot.summit}` : ''}${spot.points ? ` <span style="color:#ff9632">(${spot.points}pt)</span>` : ''}<br>${spot.freq} ${spot.mode || ''} <span style="color:#888">${spot.time || ''}</span>`)
+            .addTo(map);
+          sotaMarkersRef.current.push(marker);
+
+          // Only show callsign label when labels are enabled
+          if (showDXLabels) {
+            const labelIcon = L.divIcon({
+              className: '',
+              html: `<span style="display:inline-block;background:#ff9632;color:#000;padding:4px 8px;border-radius:4px;font-size:12px;font-family:'JetBrains Mono',monospace;font-weight:700;white-space:nowrap;border:2px solid rgba(0,0,0,0.5);box-shadow:0 2px 4px rgba(0,0,0,0.4);">${spot.call}</span>`,
+              iconSize: null,
+              iconAnchor: [0, -2]
+            });
+            const label = L.marker([spot.lat, spot.lon], { icon: labelIcon, interactive: false }).addTo(map);
+            sotaMarkersRef.current.push(label);
+          }
+        }
+      });
+    }
+  }, [sotaSpots, showSOTA, showDXLabels]);
+
   // Update satellite markers with orbit tracks
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -1017,6 +1059,11 @@ export const WorldMap = ({
         {showPOTA && (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             <span style={{ background: '#44cc44', color: '#000', padding: '2px 5px', borderRadius: '3px', fontWeight: '600' }}>▲ POTA</span>
+          </div>
+        )}
+        {showSOTA && (
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            <span style={{ background: '#ff9632', color: '#000', padding: '2px 5px', borderRadius: '3px', fontWeight: '600' }}>◆ SOTA</span>
           </div>
         )}
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
